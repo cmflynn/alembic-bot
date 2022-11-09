@@ -7,9 +7,13 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
-
-REPOSITORY: str = "organization/code.organization.com"
+REPOSITORY: str = os.environ["REPOSITORY"]
 GITHUB_TOKEN: str = os.environ["GITHUB_TOKEN"]
+MASTER_BRANCH = os.environ["MASTER_BRANCH"]
+
+# matches: `1234_xx11`
+# language=regexp -- this just ensures pycharm can highlight the regexp
+REVISION_REGEX = r"^(\d{4})_(.{4})$"
 
 master_commits: List[str] = []
 
@@ -19,7 +23,9 @@ def get_github_open_pull_requests() -> List[dict]:
     page = 1
 
     while True:
-        response = get(f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&sort=created&per_page=100&page={page}")
+        response = get(
+            f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&sort=created&per_page=100&page={page}"
+        )
         page_data = response.json()
         data.extend(page_data)
         if len(page_data) < 100:
@@ -34,7 +40,9 @@ def get_github_pull_request_changed_files(pr_number: int) -> List[dict]:
     page = 1
 
     while True:
-        response = get(f"https://api.github.com/repos/{REPOSITORY}/pulls/{pr_number}/files?per_page=100&page={page}")
+        response = get(
+            f"https://api.github.com/repos/{REPOSITORY}/pulls/{pr_number}/files?per_page=100&page={page}"
+        )
         page_data = response.json()
         data.extend(page_data)
         if len(page_data) < 100:
@@ -56,7 +64,9 @@ def get_github_file_contents(sha: str, path: str) -> bytes:
 
 def get_next_100_github_master_commits() -> None:
     page = len(master_commits) // 100
-    response = get(f"https://api.github.com/repos/{REPOSITORY}/commits?page={page}&per_page=100")
+    response = get(
+        f"https://api.github.com/repos/{REPOSITORY}/commits?page={page}&per_page=100"
+    )
     for commit in response.json():
         master_commits.append(commit["sha"])
 
@@ -87,7 +97,9 @@ def get_alembic_ini_paths() -> list:
 
 def get_alembic_revision_map() -> Dict[str, Dict[str, Any]]:
 
-    script_location_regex = re.compile(r"^script_location = (\w+)$", re.DOTALL | re.MULTILINE)
+    script_location_regex = re.compile(
+        r"^script_location = (\w+)$", re.DOTALL | re.MULTILINE
+    )
 
     alembic_map = {}
     for alembic_ini_path in get_alembic_ini_paths():
@@ -97,7 +109,9 @@ def get_alembic_revision_map() -> Dict[str, Dict[str, Any]]:
         script_locations = script_location_regex.findall(alembic_data)
 
         for script_location in script_locations:
-            script_location = os.path.join(os.path.dirname(alembic_ini_path), script_location)
+            script_location = os.path.join(
+                os.path.dirname(alembic_ini_path), script_location
+            )
             script_location = os.path.abspath(script_location)
             version_location = os.path.join(script_location, "versions")
 
@@ -126,7 +140,9 @@ def get_alembic_revision_map() -> Dict[str, Dict[str, Any]]:
                     elif isinstance(down_revision, tuple):
                         down_revisions.update(down_revision)
                     else:
-                        raise Exception(f"Implementation Error - unknown down_revision type: {down_revision}")
+                        raise Exception(
+                            f"Implementation Error - unknown down_revision type: {down_revision}"
+                        )
 
             if len(revision_history) == 0 and len(down_revisions) == 0:
                 print(f"no revisions found for {script_location}")
@@ -144,7 +160,9 @@ def get_alembic_revision_map() -> Dict[str, Dict[str, Any]]:
     return alembic_map
 
 
-def parse_revisions_from_file(file_contents: bytes) -> Tuple[Optional[str], Optional[str]]:
+def parse_revisions_from_file(
+    file_contents: bytes,
+) -> Tuple[Optional[str], Optional[str]]:
     revision = None
     down_revision = None
 
@@ -162,7 +180,9 @@ def parse_revisions_from_file(file_contents: bytes) -> Tuple[Optional[str], Opti
                             down_revision = tuple(d.value for d in down_revision.elts)
     except Exception:
         revision_match = re.search(rb"revision = ['\"]([\w_]+)['\"]", file_contents)
-        down_revision_match = re.search(rb"down_revision = ['\"]([\w_]+)['\"]", file_contents)
+        down_revision_match = re.search(
+            rb"down_revision = ['\"]([\w_]+)['\"]", file_contents
+        )
         if revision_match and down_revision_match:
             revision = revision_match.group(1)
             down_revision = down_revision_match.group(1)
@@ -197,13 +217,17 @@ def update_pull_request(pr_number: int, files_to_update: List[dict]) -> None:
     while base_sha not in master_commits:
         fetches += 1
         if fetches >= 50:
-            print(f"`git fetch master` reached maximum fetch depth of {fetches}")
+            print(
+                f"`git fetch {MASTER_BRANCH}` reached maximum fetch depth of {fetches}"
+            )
             return
 
         # fetch 99 commits first time, as there is already one commit fetched by GitHub Action
         deepen = 100 if master_commits else 99
-        if return_code := execute("git", "fetch", f"--deepen={deepen}", "origin", "master"):
-            print(f"`git fetch master` failed with return code {return_code}")
+        if return_code := execute(
+            "git", "fetch", f"--deepen={deepen}", "origin", MASTER_BRANCH
+        ):
+            print(f"`git fetch {MASTER_BRANCH}` failed with return code {return_code}")
             return
 
         get_next_100_github_master_commits()
@@ -212,7 +236,9 @@ def update_pull_request(pr_number: int, files_to_update: List[dict]) -> None:
         print(f"`git fetch {pr_branch}` failed with return code {return_code}")
         return
 
-    if return_code := execute("git", "checkout", "-b", pr_branch, f"origin/{pr_branch}"):
+    if return_code := execute(
+        "git", "checkout", "-b", pr_branch, f"origin/{pr_branch}"
+    ):
         print(f"`git checkout` failed with return code {return_code}")
         return
 
@@ -222,7 +248,12 @@ def update_pull_request(pr_number: int, files_to_update: List[dict]) -> None:
         return
 
     # dont update stale PRs to save some $$$
-    commit_messages = list(filter(lambda m: not m.startswith("Merge branch 'master'"), commit_messages))
+    commit_messages = list(
+        filter(
+            lambda m: not m.startswith(f"Merge branch '{MASTER_BRANCH}'"),
+            commit_messages,
+        )
+    )
     if commit_messages[:3] == [
         "update alembic revision id",
         "update alembic revision id",
@@ -231,7 +262,7 @@ def update_pull_request(pr_number: int, files_to_update: List[dict]) -> None:
         print("not updating revision id, already updated three times")
         return
 
-    if return_code := execute("git", "merge", "master"):
+    if return_code := execute("git", "merge", MASTER_BRANCH):
         print(f"`git merge` failed with return code {return_code}")
         execute("git", "merge", "--abort")
 
@@ -248,10 +279,10 @@ def update_pull_request(pr_number: int, files_to_update: List[dict]) -> None:
         )
 
         # if revision ids are sequential, bump the filename and current revision id by one
-        if match := re.search(r"^(\d{5})_(.{5})$", file_to_update["head_revision"]):
-            revision_match = re.search(r"^(\d{5})_(.{5})$", file_to_update["revision"])
+        if match := re.search(REVISION_REGEX, file_to_update["head_revision"]):
+            revision_match = re.search(REVISION_REGEX, file_to_update["revision"])
             new_revision_id: str = (
-                str((int(match.group(1)) + 1)).zfill(5)
+                str((int(match.group(1)) + 1)).zfill(4)
                 + "_"
                 + (revision_match or match).group(2)
             )
@@ -259,7 +290,9 @@ def update_pull_request(pr_number: int, files_to_update: List[dict]) -> None:
             os.unlink(filename)
             execute("git", "rm", filename)
 
-            new_filename: str = filename.replace(file_to_update["revision"], new_revision_id)
+            new_filename: str = filename.replace(
+                file_to_update["revision"], new_revision_id
+            )
             new_file_contents = re.sub(
                 file_to_update["revision"].encode("utf-8"),
                 new_revision_id.encode("utf-8"),
@@ -312,7 +345,9 @@ def get_last_commit_messages(n: int) -> List[str]:
 def get(url: str) -> requests.Response:
     for attempt in range(5):
         try:
-            response = requests.get(url=url, headers={"Authorization": f"token {GITHUB_TOKEN}"})
+            response = requests.get(
+                url=url, headers={"Authorization": f"token {GITHUB_TOKEN}"}
+            )
             response.raise_for_status()
             return response
         except requests.exceptions.HTTPError:
@@ -331,7 +366,7 @@ def fix_alembic_revisions() -> None:
         pr_branch = open_pr["head"]["ref"]
         base_branch = open_pr["base"]["ref"]
 
-        if base_branch != "master":
+        if base_branch != MASTER_BRANCH:
             continue
 
         print(f"checking pull request #{pr_number}: {pr_branch}")
@@ -393,21 +428,24 @@ def fix_alembic_revisions() -> None:
                 continue
 
             print(
-                "down_revision {}/{} -> {} in {} does not match head revision in master: {}".format(
+                "down_revision {}/{} -> {} in {} does not match head revision in {}: {}".format(
                     os.path.basename(alembic_script_location),
                     down_revision,
                     revision,
                     pr_branch,
+                    MASTER_BRANCH,
                     head_revision,
                 )
             )
 
-            files_to_update.append({
-                "filename": filename,
-                "revision": revision,
-                "down_revision": down_revision,
-                "head_revision": head_revision,
-            })
+            files_to_update.append(
+                {
+                    "filename": filename,
+                    "revision": revision,
+                    "down_revision": down_revision,
+                    "head_revision": head_revision,
+                }
+            )
 
         # if there are files to update, merge master and push commit with
         # fixed revision ids to the PR
