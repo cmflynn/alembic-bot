@@ -4,7 +4,7 @@ import re
 import subprocess
 import time
 from typing import Any, Dict, List, Optional, Tuple
-
+import typer
 import requests
 
 REPOSITORY: str = os.environ["REPOSITORY"]
@@ -17,15 +17,18 @@ REVISION_REGEX = r"^(\d{4})_(.{4})$"
 
 master_commits: List[str] = []
 
+app = typer.Typer()
 
-def get_github_open_pull_requests() -> List[dict]:
+
+def get_github_open_pull_requests(target_pull_request) -> List[dict]:
     data = []
     page = 1
+    url = f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&sort=created&per_page=100&page={page}"
+    if target_pull_request:
+        url = f"https://api.github.com/repos/{REPOSITORY}/pulls/{target_pull_request}"
 
     while True:
-        response = get(
-            f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&sort=created&per_page=100&page={page}"
-        )
+        response = get(url)
         page_data = response.json()
         data.extend(page_data)
         if len(page_data) < 100:
@@ -82,7 +85,7 @@ def get_alembic_ini_paths() -> list:
 
     alembic_paths = []
 
-    for dirpath, dirnames, _ in os.walk("."):
+    for dirpath, dirnames, _ in os.walk(""):
         for ignored_name in ignored_directories:
             if ignored_name in dirnames:
                 dirnames.remove(ignored_name)
@@ -207,7 +210,7 @@ def execute(*args) -> int:
     return process.returncode
 
 
-def update_pull_request(pr_number: int, files_to_update: List[dict]) -> None:
+def update_pull_request(pr_number: int, files_to_update: List[dict], dry_run=False) -> None:
     pr_info: dict = get_github_pull_request_info(pr_number)
     pr_sha: str = pr_info["head"]["sha"]
     pr_branch: str = pr_info["head"]["ref"]
@@ -307,6 +310,11 @@ def update_pull_request(pr_number: int, files_to_update: List[dict]) -> None:
                 fp.write(new_file_contents)
                 fp.truncate()
 
+    if dry_run:
+        print(f"would commit and push: ")
+        execute("git", "diff", "--name-only" "--cached")
+        return
+
     if return_code := execute("git", "commit", "-am", "update alembic revision id"):
         print(f"`git commit` failed with return code {return_code}")
         return
@@ -356,11 +364,12 @@ def get(url: str) -> requests.Response:
             time.sleep(attempt + 1)
 
 
-def fix_alembic_revisions() -> None:
+@app.command()
+def main(target_pull_request=None, dry_run=False):
 
     alembic_revisions = get_alembic_revision_map()
 
-    for open_pr in get_github_open_pull_requests():
+    for open_pr in get_github_open_pull_requests(target_pull_request):
         pr_sha = open_pr["head"]["sha"]
         pr_number = open_pr["number"]
         pr_branch = open_pr["head"]["ref"]
@@ -447,11 +456,11 @@ def fix_alembic_revisions() -> None:
                 }
             )
 
-        # if there are files to update, merge master and push commit with
-        # fixed revision ids to the PR
+        # # if there are files to update, merge master and push commit with
+        # # fixed revision ids to the PR
         if files_to_update:
-            update_pull_request(pr_number, files_to_update)
+            update_pull_request(pr_number, files_to_update, dry_run)
 
 
 if __name__ == "__main__":
-    fix_alembic_revisions()
+    app()
