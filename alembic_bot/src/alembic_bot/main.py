@@ -21,11 +21,15 @@ app = typer.Typer()
 
 
 def get_github_open_pull_requests(target_pull_request) -> List[dict]:
+
+    if target_pull_request:
+        url = f"https://api.github.com/repos/{REPOSITORY}/pulls/{target_pull_request}"
+        response = get(url)
+        return [response.json()]
+
     data = []
     page = 1
     url = f"https://api.github.com/repos/{REPOSITORY}/pulls?state=open&sort=created&per_page=100&page={page}"
-    if target_pull_request:
-        url = f"https://api.github.com/repos/{REPOSITORY}/pulls/{target_pull_request}"
 
     while True:
         response = get(url)
@@ -210,7 +214,9 @@ def execute(*args) -> int:
     return process.returncode
 
 
-def update_pull_request(pr_number: int, files_to_update: List[dict], dry_run=False) -> None:
+def update_pull_request(
+    pr_number: int, files_to_update: List[dict], dry_run=False
+) -> None:
     pr_info: dict = get_github_pull_request_info(pr_number)
     pr_sha: str = pr_info["head"]["sha"]
     pr_branch: str = pr_info["head"]["ref"]
@@ -365,7 +371,12 @@ def get(url: str) -> requests.Response:
 
 
 @app.command()
-def main(target_pull_request=None, dry_run=False):
+def bot(
+    target_pull_request: int = typer.Option(None),
+    dry_run: bool = typer.Option(False),
+):
+
+    print(f"running with: {target_pull_request=}, {dry_run=}")
 
     alembic_revisions = get_alembic_revision_map()
 
@@ -460,6 +471,10 @@ def main(target_pull_request=None, dry_run=False):
         # # fixed revision ids to the PR
         if files_to_update:
             update_pull_request(pr_number, files_to_update, dry_run)
+
+
+def main():
+    app()
 
 
 if __name__ == "__main__":

@@ -3,7 +3,8 @@ import setuptools
 
 setuptools.setup(
     name="alembic_bot",
-    version="1.1",
+    url="https://github.com/cmflynn/alembic-bot",
+    version="1.4",
     author="cmflynn, paunovic",
     package_dir={"": "src"},
     packages=["alembic_bot"],

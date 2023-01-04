@@ -1,2 +1,5 @@
 /.idea/
 venv
+/alembic_bot/build/
+/alembic_bot/dist/
+/alembic_bot/src/alembic_bot.egg-info/
